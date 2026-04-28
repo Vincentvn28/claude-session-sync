@@ -2,7 +2,7 @@
   "name": "claude-session-sync",
   "displayName": "Claude Session Sync",
   "description": "Sync Claude Code sessions (chat history + memory + plans) across machines via Google Drive — 1-click push/pull, AES-256 encrypted.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "Vincentvn28",
   "engines": {
     "vscode": "^1.85.0"

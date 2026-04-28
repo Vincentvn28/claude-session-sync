@@ -146,7 +146,7 @@ export class GoogleAuth {
         const state = u.searchParams.get('state');
 
         const html = (title: string, body: string) =>
-          `<!doctype html><html lang="vi"><head><meta charset="utf-8">` +
+          `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
           `<title>${title}</title>` +
           `<style>body{font-family:system-ui,Segoe UI,sans-serif;` +
           `display:flex;align-items:center;justify-content:center;height:100vh;` +
@@ -159,7 +159,7 @@ export class GoogleAuth {
         if (error) {
           res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
           res.end(html('OAuth error',
-            `<h1>❌ ${error}</h1><p>Có thể đóng tab này.</p>`));
+            `<h1>❌ ${error}</h1><p>You can close this tab.</p>`));
           if (!resolved) {
             resolved = true;
             server.close();
@@ -170,13 +170,13 @@ export class GoogleAuth {
         if (!code) {
           res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
           res.end(html('OAuth error',
-            `<h1>❌ Thiếu code</h1><p>Có thể đóng tab này.</p>`));
+            `<h1>❌ Missing code</h1><p>You can close this tab.</p>`));
           return;
         }
         if (state !== expectedState) {
           res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
           res.end(html('OAuth error',
-            `<h1>❌ State không khớp</h1><p>Thử đăng nhập lại.</p>`));
+            `<h1>❌ State mismatch</h1><p>Please try signing in again.</p>`));
           if (!resolved) {
             resolved = true;
             server.close();
@@ -186,9 +186,9 @@ export class GoogleAuth {
         }
 
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        res.end(html('Đăng nhập thành công',
-          `<h1>✅ Đăng nhập thành công</h1>` +
-          `<p>Có thể đóng tab này và quay lại Antigravity.</p>`));
+        res.end(html('Sign-in successful',
+          `<h1>✅ Sign-in successful</h1>` +
+          `<p>You can close this tab and return to your editor.</p>`));
 
         if (!resolved) {
           resolved = true;
@@ -201,8 +201,8 @@ export class GoogleAuth {
         if (!resolved) {
           resolved = true;
           reject(new Error(
-            `Không bind được port ${REDIRECT_PORT}: ${e.message}\n` +
-            `App khác đang dùng port này, đóng nó đi rồi thử lại.`));
+            `Cannot bind port ${REDIRECT_PORT}: ${e.message}\n` +
+            `Another app is using this port — close it and try again.`));
         }
       });
 
@@ -216,7 +216,7 @@ export class GoogleAuth {
         if (!resolved) {
           resolved = true;
           server.close();
-          reject(new Error('OAuth timeout sau 5 phút — thử lại.'));
+          reject(new Error('OAuth timeout after 5 minutes — please try again.'));
         }
       }, 5 * 60_000);
     });
