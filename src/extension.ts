@@ -8,7 +8,7 @@ import { listAllSessions, exportOneSession, SessionInfo } from './exporter';
 import { importOneSession } from './importer';
 import { encryptFile, decryptFile } from './crypto';
 import { SyncStatusBar } from './statusBar';
-import { machineId, getClaudeProjectHash } from './pathUtils';
+import { machineId, getClaudeProjectHash, listKnownProjects } from './pathUtils';
 
 const PASSPHRASE_KEY = 'claudeSync.passphrase';
 const LAST_SYNC_KEY = 'claudeSync.lastSync';
@@ -469,15 +469,66 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
   }
 }
 
-async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
+interface TargetPickItem extends vscode.QuickPickItem {
+  /** undefined = "Browse for folder…" placeholder; resolved at pick time. */
+  targetPath?: string;
+}
+
+/**
+ * Ask the user where to import — current workspace, a detected project,
+ * or an arbitrary folder via the OS folder picker. Returns null if the
+ * user cancels at any step.
+ */
+async function pickTargetProject(): Promise<string | null> {
+  const items: TargetPickItem[] = [];
   const ws = currentWorkspacePath();
-  if (!ws) {
-    vscode.window.showWarningMessage(
-      'No folder/workspace open. Open a project and try import again — the extension needs a workspace to rewrite paths.',
-    );
-    return;
+
+  if (ws) {
+    items.push({
+      label: `$(folder-active) Current workspace — ${path.basename(ws)}`,
+      detail: ws,
+      targetPath: ws,
+    });
   }
 
+  const known = await listKnownProjects().catch(() => []);
+  for (const k of known) {
+    // Don't double-list the current workspace if it's also a detected project.
+    if (ws && path.resolve(k.path).toLowerCase() === path.resolve(ws).toLowerCase()) continue;
+    items.push({
+      label: `$(folder) ${path.basename(k.path)}`,
+      description: `${k.sessionCount} session${k.sessionCount === 1 ? '' : 's'}`,
+      detail: k.path,
+      targetPath: k.path,
+    });
+  }
+
+  items.push({
+    label: '$(folder-opened) Browse for folder…',
+    description: 'pick any project folder on disk',
+    targetPath: undefined,
+  });
+
+  const pick = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Import the session(s) into which project?',
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+  if (!pick) return null;
+  if (pick.targetPath) return pick.targetPath;
+
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    openLabel: 'Use as target project',
+    title: 'Pick the target project folder',
+  });
+  if (!picked || picked.length === 0) return null;
+  return picked[0].fsPath;
+}
+
+async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
   const passphrase = await getOrAskPassphrase(ctx, false);
   if (!passphrase) return;
 
@@ -491,10 +542,17 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
   });
   if (!picked || picked.length === 0) return;
 
-  const projectName = path.basename(ws);
+  const target = await pickTargetProject();
+  if (!target) return;
+
+  const targetName = path.basename(target);
+  const ws = currentWorkspacePath();
+  const targetIsCurrentWs = ws !== null && path.resolve(target).toLowerCase() === path.resolve(ws).toLowerCase();
+
+  const sourceList = picked.map((p) => `  • ${path.basename(p.fsPath)}`).join('\n');
   const confirm = await vscode.window.showWarningMessage(
-    `Import ${picked.length} file(s) into workspace "${projectName}". ` +
-      'Paths inside the sessions will be rewritten to this machine. ' +
+    `Import ${picked.length} file(s) into project "${targetName}":\n\n${sourceList}\n\n→ ${target}\n\n` +
+      'Paths inside the sessions will be rewritten to this target. ' +
       'Sessions with matching UUIDs will be OVERWRITTEN. Continue?',
     { modal: true },
     'Import',
@@ -528,7 +586,7 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
           await decryptFile(f.fsPath, plainZip, passphrase);
           const r = await importOneSession({
             zipPath: plainZip,
-            targetWorkspacePath: ws,
+            targetWorkspacePath: target,
           });
           succeeded++;
           if (r.overwrote) overwrote++;
@@ -562,12 +620,26 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
     (failed > 0 ? ` · ${failed} failed` : '');
 
   if (succeeded > 0) {
-    const reload = await vscode.window.showInformationMessage(
-      `✅ Import complete: ${summary}. Reload window for Claude Code to pick up new sessions.`,
-      'Reload Window',
-    );
-    if (reload === 'Reload Window') {
-      vscode.commands.executeCommand('workbench.action.reloadWindow');
+    if (targetIsCurrentWs) {
+      const action = await vscode.window.showInformationMessage(
+        `✅ Import complete: ${summary}. Reload window for Claude Code to pick up new sessions.`,
+        'Reload Window',
+      );
+      if (action === 'Reload Window') {
+        vscode.commands.executeCommand('workbench.action.reloadWindow');
+      }
+    } else {
+      const action = await vscode.window.showInformationMessage(
+        `✅ Import complete: ${summary}. Sessions imported into "${targetName}".`,
+        'Open in new window',
+      );
+      if (action === 'Open in new window') {
+        vscode.commands.executeCommand(
+          'vscode.openFolder',
+          vscode.Uri.file(target),
+          { forceNewWindow: true },
+        );
+      }
     }
   } else {
     vscode.window.showErrorMessage(
