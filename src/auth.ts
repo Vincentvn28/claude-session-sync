@@ -85,7 +85,12 @@ export class GoogleAuth {
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('scope', SCOPES.join(' '));
     authUrl.searchParams.set('access_type', 'offline');
-    authUrl.searchParams.set('include_granted_scopes', 'true');
+    // Do NOT enable include_granted_scopes — if the user previously granted
+    // wider scopes (older versions of this extension asked for openid/email/
+    // profile/drive.readonly), Google would re-include them on the consent
+    // screen even though we only request drive.file now. We always want a
+    // fresh, minimal consent surface.
+    authUrl.searchParams.set('include_granted_scopes', 'false');
     authUrl.searchParams.set('prompt', 'consent select_account');
     authUrl.searchParams.set('code_challenge', challenge);
     authUrl.searchParams.set('code_challenge_method', 'S256');
