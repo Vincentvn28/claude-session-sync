@@ -41,7 +41,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   auth = new GoogleAuth(ctx.secrets);
   drive = new DriveClient(async () => {
     const t = await auth.getAccessToken();
-    if (!t) throw new Error('Chưa đăng nhập Google. Chạy "Claude Sync: Đăng nhập Google".');
+    if (!t) throw new Error('Not signed in. Run "Claude Sync: Sign in with Google".');
     return t;
   });
   statusBar = new SyncStatusBar();
@@ -73,34 +73,34 @@ function currentWorkspacePath(): string | null {
 
 async function signIn(): Promise<void> {
   try {
-    statusBar.setBusy('Đang mở browser…');
+    statusBar.setBusy('Opening browser…');
     const email = await auth.signIn();
     statusBar.setBusy(null);
     statusBar.setSignedIn(email);
     vscode.window.showInformationMessage(
-      email ? `Đã đăng nhập Google: ${email}` : 'Đã đăng nhập Google.',
+      email ? `Signed in to Google: ${email}` : 'Signed in to Google.',
     );
   } catch (e) {
     statusBar.setBusy(null);
     logError('signIn failed', e);
-    vscode.window.showErrorMessage(`Đăng nhập thất bại: ${(e as Error).message}`);
+    vscode.window.showErrorMessage(`Sign-in failed: ${(e as Error).message}`);
   }
 }
 
 async function signOut(): Promise<void> {
   await auth.signOut();
   statusBar.setSignedIn(undefined);
-  vscode.window.showInformationMessage('Đã đăng xuất Google.');
+  vscode.window.showInformationMessage('Signed out of Google.');
 }
 
 async function ensureSignedIn(): Promise<boolean> {
   if (await auth.isSignedIn()) return true;
   const pick = await vscode.window.showInformationMessage(
-    'Chưa đăng nhập Google. Đăng nhập ngay?',
-    'Đăng nhập',
-    'Huỷ',
+    'Not signed in to Google. Sign in now?',
+    'Sign in',
+    'Cancel',
   );
-  if (pick !== 'Đăng nhập') return false;
+  if (pick !== 'Sign in') return false;
   try {
     await signIn();
     return await auth.isSignedIn();
@@ -117,24 +117,24 @@ async function getOrAskPassphrase(
   if (pass) return pass;
 
   const prompt = forNew
-    ? 'Đặt passphrase mã hoá (≥ 8 ký tự). Mất passphrase = mất tất cả file đã đẩy.'
-    : 'Nhập passphrase đã đặt khi push session lần đầu.';
+    ? 'Set encryption passphrase (≥ 8 characters). Losing the passphrase = losing access to all uploaded files.'
+    : 'Enter the passphrase you set when first pushing a session.';
   pass = await vscode.window.showInputBox({
     prompt,
     password: true,
     ignoreFocusOut: true,
-    validateInput: (v) => (v.length < 8 ? 'Tối thiểu 8 ký tự.' : null),
+    validateInput: (v) => (v.length < 8 ? 'At least 8 characters required.' : null),
   });
   if (!pass) return null;
 
   if (forNew) {
     const confirm = await vscode.window.showInputBox({
-      prompt: 'Nhập lại passphrase để xác nhận.',
+      prompt: 'Re-enter the passphrase to confirm.',
       password: true,
       ignoreFocusOut: true,
     });
     if (confirm !== pass) {
-      vscode.window.showErrorMessage('Passphrase không khớp.');
+      vscode.window.showErrorMessage('Passphrases do not match.');
       return null;
     }
   }
@@ -145,7 +145,7 @@ async function getOrAskPassphrase(
 async function setPassphrase(ctx: vscode.ExtensionContext): Promise<void> {
   await ctx.secrets.delete(PASSPHRASE_KEY);
   await getOrAskPassphrase(ctx, true);
-  vscode.window.showInformationMessage('Đã lưu passphrase mới.');
+  vscode.window.showInformationMessage('New passphrase saved.');
 }
 
 async function ensureRootFolder(folderName: string): Promise<string> {
@@ -160,7 +160,7 @@ async function pickSessionsToPush(): Promise<SessionInfo[] | null> {
   const ws = currentWorkspacePath();
   if (!ws) {
     vscode.window.showWarningMessage(
-      'Chưa mở folder/workspace nào. Mở project rồi push lại — extension chỉ push session của project đang mở.',
+      'No folder/workspace open. Open a project and try push again — the extension only pushes sessions for the open project.',
     );
     return null;
   }
@@ -168,8 +168,8 @@ async function pickSessionsToPush(): Promise<SessionInfo[] | null> {
   const all = await listAllSessions(projectHash);
   if (all.length === 0) {
     vscode.window.showWarningMessage(
-      `Không có session nào của project hiện tại (${projectHash}). ` +
-      'Chat với Claude Code trong project này ít nhất 1 lần trước khi push.',
+      `No sessions found for the current project (${projectHash}). ` +
+      'Chat with Claude Code in this project at least once before pushing.',
     );
     return null;
   }
@@ -177,14 +177,14 @@ async function pickSessionsToPush(): Promise<SessionInfo[] | null> {
   const items: SessionPickItem[] = all.map((s) => ({
     label: `$(comment-discussion) ${s.title || '(untitled)'}`,
     description: `${(s.sizeBytes / 1024 / 1024).toFixed(1)}MB`,
-    detail: `sửa ${new Date(s.modifiedMs).toLocaleString()} · ${s.sessionId.slice(0, 8)}`,
+    detail: `modified ${new Date(s.modifiedMs).toLocaleString()} · ${s.sessionId.slice(0, 8)}`,
     picked: true,
     session: s,
   }));
 
   const picks = await vscode.window.showQuickPick(items, {
     canPickMany: true,
-    placeHolder: `Chọn session để push (project hiện tại — ${all.length} session)`,
+    placeHolder: `Pick sessions to push (current project — ${all.length} sessions)`,
     matchOnDescription: true,
     matchOnDetail: true,
   });
@@ -211,7 +211,7 @@ async function pushSessions(ctx: vscode.ExtensionContext): Promise<void> {
   let totalBytes = 0;
 
   try {
-    statusBar.setBusy('chuẩn bị');
+    statusBar.setBusy('preparing');
     const rootId = await ensureRootFolder(folderName);
 
     await vscode.window.withProgress(
@@ -288,18 +288,18 @@ async function pushSessions(ctx: vscode.ExtensionContext): Promise<void> {
     const totalMB = (totalBytes / 1024 / 1024).toFixed(1);
     if (failed === 0) {
       vscode.window.showInformationMessage(
-        `✅ Push xong: ${succeeded} session · ${totalMB}MB → Drive/${folderName}`,
+        `✅ Push complete: ${succeeded} session · ${totalMB}MB → Drive/${folderName}`,
       );
     } else {
       vscode.window.showWarningMessage(
-        `Push xong với lỗi: ${succeeded} OK, ${failed} fail. Xem Output → "Claude Session Sync".`,
+        `Push finished with errors: ${succeeded} OK, ${failed} failed. See Output → "Claude Session Sync".`,
       );
     }
   } catch (e) {
     statusBar.setBusy(null);
     logError('push (top-level) failed', e);
     vscode.window.showErrorMessage(
-      `Push thất bại: ${(e as Error).message}. Xem Output → "Claude Session Sync".`,
+      `Push failed: ${(e as Error).message}. See Output → "Claude Session Sync".`,
     );
   }
 }
@@ -318,7 +318,7 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
   const ws = currentWorkspacePath();
   if (!ws) {
     vscode.window.showWarningMessage(
-      'Chưa mở folder/workspace nào. Mở project rồi pull lại — extension cần workspace để rewrite path.',
+      'No folder/workspace open. Open a project and try pull again — the extension needs a workspace to rewrite paths.',
     );
     return;
   }
@@ -339,14 +339,14 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
     statusBar.setBusy(null);
     logError('pull list failed', e);
     vscode.window.showErrorMessage(
-      `Pull thất bại: ${(e as Error).message}. Xem Output → "Claude Session Sync".`,
+      `Pull failed: ${(e as Error).message}. See Output → "Claude Session Sync".`,
     );
     return;
   }
 
   if (files.length === 0) {
     vscode.window.showWarningMessage(
-      `Không có file .csz nào trên Drive/${folderName}. Push từ máy khác hoặc copy file .csz vào folder này trước.`,
+      `No .csz files found in Drive/${folderName}. Push from another machine first.`,
     );
     return;
   }
@@ -376,16 +376,16 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
 
   const picks = await vscode.window.showQuickPick(items, {
     canPickMany: true,
-    placeHolder: `Chọn session để pull (${files.length} file .csz trên Drive — path sẽ rewrite về workspace "${projectName}")`,
+    placeHolder: `Pick sessions to pull (${files.length} .csz file(s) on Drive — paths will be rewritten to workspace "${projectName}")`,
     matchOnDescription: true,
     matchOnDetail: true,
   });
   if (!picks || picks.length === 0) return;
 
   const confirm = await vscode.window.showWarningMessage(
-    `Pull ${picks.length} session vào workspace "${projectName}". ` +
-      'Path bên trong session sẽ được rewrite về máy này. ' +
-      'Session UUID trùng sẽ bị ĐÈ. Tiếp tục?',
+    `Pull ${picks.length} session(s) into workspace "${projectName}". ` +
+      'Paths inside the sessions will be rewritten to this machine. ' +
+      'Sessions with matching UUIDs will be OVERWRITTEN. Continue?',
     { modal: true },
     'Pull',
   );
@@ -449,14 +449,14 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
   }
 
   const summary =
-    `${succeeded} session OK` +
-    (overwrote > 0 ? ` (${overwrote} đè cũ)` : '') +
-    (pathRewrites > 0 ? ` · ${pathRewrites} path rewritten` : '') +
-    (failed > 0 ? ` · ${failed} fail` : '');
+    `${succeeded} session(s) OK` +
+    (overwrote > 0 ? ` (${overwrote} overwritten)` : '') +
+    (pathRewrites > 0 ? ` · ${pathRewrites} path(s) rewritten` : '') +
+    (failed > 0 ? ` · ${failed} failed` : '');
 
   if (succeeded > 0) {
     const reload = await vscode.window.showInformationMessage(
-      `✅ Pull xong: ${summary}. Reload window để Claude Code nhận session mới.`,
+      `✅ Pull complete: ${summary}. Reload window for Claude Code to pick up new sessions.`,
       'Reload Window',
     );
     if (reload === 'Reload Window') {
@@ -464,7 +464,7 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
     }
   } else {
     vscode.window.showErrorMessage(
-      `Pull thất bại: ${summary}. Xem Output → "Claude Session Sync".`,
+      `Pull failed: ${summary}. See Output → "Claude Session Sync".`,
     );
   }
 }
@@ -473,7 +473,7 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
   const ws = currentWorkspacePath();
   if (!ws) {
     vscode.window.showWarningMessage(
-      'Chưa mở folder/workspace nào. Mở project rồi import lại — extension cần workspace để rewrite path.',
+      'No folder/workspace open. Open a project and try import again — the extension needs a workspace to rewrite paths.',
     );
     return;
   }
@@ -486,16 +486,16 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
     canSelectFolders: false,
     canSelectMany: true,
     openLabel: 'Import',
-    title: 'Chọn file .csz để import',
+    title: 'Pick .csz file(s) to import',
     filters: { 'Claude Sync Encrypted': ['csz'] },
   });
   if (!picked || picked.length === 0) return;
 
   const projectName = path.basename(ws);
   const confirm = await vscode.window.showWarningMessage(
-    `Import ${picked.length} file vào workspace "${projectName}". ` +
-      'Path bên trong session sẽ được rewrite về máy này. ' +
-      'Session UUID trùng sẽ bị ĐÈ. Tiếp tục?',
+    `Import ${picked.length} file(s) into workspace "${projectName}". ` +
+      'Paths inside the sessions will be rewritten to this machine. ' +
+      'Sessions with matching UUIDs will be OVERWRITTEN. Continue?',
     { modal: true },
     'Import',
   );
@@ -556,14 +556,14 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
   }
 
   const summary =
-    `${succeeded} session OK` +
-    (overwrote > 0 ? ` (${overwrote} đè cũ)` : '') +
-    (pathRewrites > 0 ? ` · ${pathRewrites} path rewritten` : '') +
-    (failed > 0 ? ` · ${failed} fail` : '');
+    `${succeeded} session(s) OK` +
+    (overwrote > 0 ? ` (${overwrote} overwritten)` : '') +
+    (pathRewrites > 0 ? ` · ${pathRewrites} path(s) rewritten` : '') +
+    (failed > 0 ? ` · ${failed} failed` : '');
 
   if (succeeded > 0) {
     const reload = await vscode.window.showInformationMessage(
-      `✅ Import xong: ${summary}. Reload window để Claude Code nhận session mới.`,
+      `✅ Import complete: ${summary}. Reload window for Claude Code to pick up new sessions.`,
       'Reload Window',
     );
     if (reload === 'Reload Window') {
@@ -571,7 +571,7 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
     }
   } else {
     vscode.window.showErrorMessage(
-      `Import thất bại: ${summary}. Xem Output → "Claude Session Sync".`,
+      `Import failed: ${summary}. See Output → "Claude Session Sync".`,
     );
   }
 }
@@ -586,24 +586,24 @@ async function openDriveFolder(): Promise<void> {
       vscode.Uri.parse(`https://drive.google.com/drive/folders/${rootId}`),
     );
   } catch (e) {
-    vscode.window.showErrorMessage(`Không mở được Drive: ${(e as Error).message}`);
+    vscode.window.showErrorMessage(`Could not open Drive: ${(e as Error).message}`);
   }
 }
 
 async function showMenu(ctx: vscode.ExtensionContext): Promise<void> {
   const signed = await auth.isSignedIn();
   const items: Array<vscode.QuickPickItem & { cmd: string }> = [
-    { label: '$(cloud-upload) Push session lên Drive', description: 'mỗi session 1 file riêng', cmd: 'claudeSync.push' },
-    { label: '$(cloud-download) Pull session từ Drive', description: 'list mọi .csz trong folder Drive', cmd: 'claudeSync.pull' },
-    { label: '$(file-zip) Import session từ file .csz local', description: 'cho file copy bằng tay / tải về máy', cmd: 'claudeSync.importFile' },
-    { label: '$(folder) Mở folder Drive', cmd: 'claudeSync.openDriveFolder' },
-    { label: '$(key) Đặt / đổi passphrase', cmd: 'claudeSync.setPassphrase' },
+    { label: '$(cloud-upload) Push session to Drive', description: 'one file per session', cmd: 'claudeSync.push' },
+    { label: '$(cloud-download) Pull session from Drive', description: 'list all .csz in the Drive folder', cmd: 'claudeSync.pull' },
+    { label: '$(file-zip) Import session from local .csz file', description: 'for manually copied / downloaded files', cmd: 'claudeSync.importFile' },
+    { label: '$(folder) Open Drive folder', cmd: 'claudeSync.openDriveFolder' },
+    { label: '$(key) Set / change passphrase', cmd: 'claudeSync.setPassphrase' },
     signed
-      ? { label: '$(sign-out) Đăng xuất Google', description: await auth.getEmail(), cmd: 'claudeSync.signOut' }
-      : { label: '$(sign-in) Đăng nhập Google', cmd: 'claudeSync.signIn' },
+      ? { label: '$(sign-out) Sign out of Google', description: await auth.getEmail(), cmd: 'claudeSync.signOut' }
+      : { label: '$(sign-in) Sign in with Google', cmd: 'claudeSync.signIn' },
   ];
   const pick = await vscode.window.showQuickPick(items, {
-    placeHolder: 'Claude Sync — chọn hành động',
+    placeHolder: 'Claude Sync — pick an action',
   });
   if (pick) await vscode.commands.executeCommand(pick.cmd);
 }

@@ -119,14 +119,14 @@ export async function importOneSession(
   opts: ImportSessionOptions,
 ): Promise<ImportSessionResult> {
   if (!fs.existsSync(opts.zipPath)) {
-    throw new Error(`Không tìm thấy file zip: ${opts.zipPath}`);
+    throw new Error(`Zip file not found: ${opts.zipPath}`);
   }
 
   const tempDir = await extractToTemp(opts.zipPath);
   try {
     const manifest = await readManifest(tempDir);
     if (!manifest) {
-      throw new Error('Zip không hợp lệ — thiếu manifest.json');
+      throw new Error('Invalid zip — missing manifest.json');
     }
 
     const projectsDir = getClaudeProjectsDir();
@@ -147,7 +147,7 @@ export async function importOneSession(
     const srcSessionFolder = path.join(tempDir, 'projects', manifest.project_hash);
     if (!fs.existsSync(srcSessionFolder)) {
       throw new Error(
-        `Zip không có folder projects/${manifest.project_hash} — file lỗi.`,
+        `Zip does not contain folder projects/${manifest.project_hash} — corrupted file.`,
       );
     }
 
@@ -158,7 +158,7 @@ export async function importOneSession(
     const dstJsonl = path.join(targetProjectFolder, `${manifest.session_id}.jsonl`);
     const overwrote = fs.existsSync(dstJsonl);
     if (!fs.existsSync(srcJsonl)) {
-      throw new Error(`Zip thiếu file ${manifest.session_id}.jsonl`);
+      throw new Error(`Zip is missing ${manifest.session_id}.jsonl`);
     }
     await fs.promises.copyFile(srcJsonl, dstJsonl);
 

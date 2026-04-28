@@ -42,22 +42,22 @@ export class SyncStatusBar {
   private refresh(): void {
     if (this.busyText) {
       this.item.text = `$(sync~spin) ${this.busyText}`;
-      this.item.tooltip = 'Claude Sync đang chạy…';
+      this.item.tooltip = 'Claude Sync working…';
       return;
     }
     if (!this.signedInEmail) {
       this.item.text = `$(cloud) Claude Sync`;
       this.item.tooltip = new vscode.MarkdownString(
-        '**Claude Sync** — chưa đăng nhập\n\nClick để đăng nhập Google.',
+        '**Claude Sync** — not signed in\n\nClick to sign in with Google.',
       );
       return;
     }
     const lastLabel = this.lastSync
       ? humanRelative(this.lastSync)
-      : 'chưa sync';
+      : 'never synced';
     this.item.text = `$(cloud) ${lastLabel}`;
     const md = new vscode.MarkdownString(
-      `**Claude Sync** — ${this.signedInEmail}\n\nLần sync cuối: ${lastLabel}\n\nClick để hiện menu.`,
+      `**Claude Sync** — ${this.signedInEmail}\n\nLast sync: ${lastLabel}\n\nClick to open menu.`,
     );
     md.isTrusted = true;
     this.item.tooltip = md;
@@ -66,8 +66,8 @@ export class SyncStatusBar {
 
 function humanRelative(ts: number): string {
   const diff = Date.now() - ts;
-  if (diff < 60_000) return 'vừa xong';
-  if (diff < 60 * 60_000) return `${Math.round(diff / 60_000)}m trước`;
-  if (diff < 24 * 60 * 60_000) return `${Math.round(diff / 3600_000)}h trước`;
-  return `${Math.round(diff / 86_400_000)} ngày trước`;
+  if (diff < 60_000) return 'just now';
+  if (diff < 60 * 60_000) return `${Math.round(diff / 60_000)}m ago`;
+  if (diff < 24 * 60 * 60_000) return `${Math.round(diff / 3600_000)}h ago`;
+  return `${Math.round(diff / 86_400_000)}d ago`;
 }

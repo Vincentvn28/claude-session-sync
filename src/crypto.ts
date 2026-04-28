@@ -79,7 +79,7 @@ export async function decryptFile(
     await fd.read(header, 0, headerLen, 0);
 
     if (!header.subarray(0, 4).equals(MAGIC)) {
-      throw new Error('File này không phải file mã hoá Claude Sync (sai magic).');
+      throw new Error('This is not a Claude Sync encrypted file (bad magic header).');
     }
     const salt = header.subarray(4, 4 + SALT_BYTES);
     const iv = header.subarray(4 + SALT_BYTES, 4 + SALT_BYTES + IV_BYTES);
@@ -101,7 +101,7 @@ export async function decryptFile(
     try {
       plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
     } catch {
-      throw new Error('Sai passphrase hoặc file đã hỏng.');
+      throw new Error('Wrong passphrase or file is corrupted.');
     }
     await fs.promises.writeFile(dstPath, plaintext);
   } finally {

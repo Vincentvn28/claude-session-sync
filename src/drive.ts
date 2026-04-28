@@ -117,7 +117,7 @@ export class DriveClient {
         uploaded = end + 1;
         onProgress?.(uploaded, total);
       }
-      throw new Error('Upload kết thúc bất thường — server không trả file metadata.');
+      throw new Error('Upload ended unexpectedly — server did not return file metadata.');
     } finally {
       await fd.close();
     }
@@ -142,7 +142,7 @@ export class DriveClient {
     });
     if (!r.ok) throw await driveError('start resumable', r);
     const loc = r.headers.get('location');
-    if (!loc) throw new Error('Drive resumable: thiếu Location header');
+    if (!loc) throw new Error('Drive resumable upload: missing Location header');
     return loc;
   }
 
@@ -255,5 +255,5 @@ function escapeQuery(s: string): string {
 
 async function driveError(op: string, r: Response): Promise<Error> {
   const text = await r.text().catch(() => '');
-  return new Error(`Drive ${op} thất bại: ${r.status} ${text.slice(0, 400)}`);
+  return new Error(`Drive ${op} failed: ${r.status} ${text.slice(0, 400)}`);
 }
