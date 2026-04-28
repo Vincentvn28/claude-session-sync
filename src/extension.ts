@@ -5,7 +5,7 @@ import * as os from 'os';
 import { GoogleAuth } from './auth';
 import { DriveClient, DriveFile } from './drive';
 import { listAllSessions, exportOneSession, SessionInfo } from './exporter';
-import { importOneSession } from './importer';
+import { importOneSession, ImportSessionResult } from './importer';
 import { encryptFile, decryptFile } from './crypto';
 import { SyncStatusBar } from './statusBar';
 import { machineId, getClaudeProjectHash, listKnownProjects } from './pathUtils';
@@ -528,9 +528,43 @@ async function pickTargetProject(): Promise<string | null> {
   return picked[0].fsPath;
 }
 
+function isWrongPassphraseError(e: unknown): boolean {
+  return e instanceof Error && /wrong passphrase|file is corrupted/i.test(e.message);
+}
+
+async function promptAlternatePassphrase(fileName: string): Promise<string | null> {
+  const v = await vscode.window.showInputBox({
+    prompt: `Decryption failed for "${fileName}". This file was likely encrypted with a different passphrase. Enter that passphrase to retry:`,
+    password: true,
+    ignoreFocusOut: true,
+    validateInput: (s) => (s.length < 8 ? 'At least 8 characters required.' : null),
+  });
+  return v ?? null;
+}
+
+async function decryptAndImport(
+  filePath: string,
+  passphrase: string,
+  targetWs: string,
+  tag: string,
+): Promise<{ result: ImportSessionResult }> {
+  const plainZip = path.join(os.tmpdir(), `csync-import-${tag}-${Date.now()}.zip`);
+  try {
+    await decryptFile(filePath, plainZip, passphrase);
+    const result = await importOneSession({
+      zipPath: plainZip,
+      targetWorkspacePath: targetWs,
+    });
+    return { result };
+  } finally {
+    await fs.promises.unlink(plainZip).catch(() => {});
+  }
+}
+
 async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
-  const passphrase = await getOrAskPassphrase(ctx, false);
-  if (!passphrase) return;
+  const initialPassphrase = await getOrAskPassphrase(ctx, false);
+  if (!initialPassphrase) return;
+  let passphrase: string = initialPassphrase;
 
   const picked = await vscode.window.showOpenDialog({
     canSelectFiles: true,
@@ -563,6 +597,7 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
   let overwrote = 0;
   let failed = 0;
   let pathRewrites = 0;
+  let alternatePassphraseUsed = false;
 
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'Claude Sync · Import', cancellable: true },
@@ -581,13 +616,34 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
         });
         statusBar.setBusy(`import ${i + 1}/${total}`);
 
-        const plainZip = path.join(os.tmpdir(), `csync-import-${i}-${Date.now()}.zip`);
+        let r: ImportSessionResult | null = null;
         try {
-          await decryptFile(f.fsPath, plainZip, passphrase);
-          const r = await importOneSession({
-            zipPath: plainZip,
-            targetWorkspacePath: target,
-          });
+          ({ result: r } = await decryptAndImport(f.fsPath, passphrase, target, String(i)));
+        } catch (e) {
+          if (isWrongPassphraseError(e)) {
+            // Stored passphrase doesn't match this file. Offer a one-shot
+            // re-prompt; the new value applies to this and remaining files.
+            const alt = await promptAlternatePassphrase(baseName);
+            if (alt) {
+              try {
+                ({ result: r } = await decryptAndImport(f.fsPath, alt, target, String(i) + '-retry'));
+                passphrase = alt;
+                alternatePassphraseUsed = true;
+              } catch (retryErr) {
+                failed++;
+                logError(`import failed (after retry) · ${baseName}`, retryErr);
+              }
+            } else {
+              failed++;
+              logError(`import failed · ${baseName}`, e);
+            }
+          } else {
+            failed++;
+            logError(`import failed · ${baseName}`, e);
+          }
+        }
+
+        if (r) {
           succeeded++;
           if (r.overwrote) overwrote++;
           pathRewrites += r.pathRewrites;
@@ -596,15 +652,21 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
             (r.overwrote ? ' (overwrote)' : '') +
             (r.pathRewrites > 0 ? ` (${r.pathRewrites} path rewrites)` : ''),
           );
-        } catch (e) {
-          failed++;
-          logError(`import failed · ${baseName}`, e);
-        } finally {
-          await fs.promises.unlink(plainZip).catch(() => {});
         }
       }
     },
   );
+
+  if (alternatePassphraseUsed && succeeded > 0) {
+    const save = await vscode.window.showInformationMessage(
+      'The alternate passphrase worked. Save it as your stored passphrase for future operations?',
+      'Save',
+      'Just for this import',
+    );
+    if (save === 'Save') {
+      await ctx.secrets.store(PASSPHRASE_KEY, passphrase);
+    }
+  }
 
   statusBar.setBusy(null);
   if (succeeded > 0) {
