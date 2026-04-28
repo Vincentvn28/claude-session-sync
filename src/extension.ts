@@ -56,7 +56,6 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.commands.registerCommand('claudeSync.signOut', () => signOut()),
     vscode.commands.registerCommand('claudeSync.push', () => pushSessions(ctx)),
     vscode.commands.registerCommand('claudeSync.pull', () => pullSessions(ctx)),
-    vscode.commands.registerCommand('claudeSync.pullAny', () => pullSessions(ctx, true)),
     vscode.commands.registerCommand('claudeSync.setPassphrase', () => setPassphrase(ctx)),
     vscode.commands.registerCommand('claudeSync.openDriveFolder', () => openDriveFolder()),
     vscode.commands.registerCommand('claudeSync.showMenu', () => showMenu(ctx)),
@@ -308,10 +307,7 @@ interface RemotePickItem extends vscode.QuickPickItem {
   file: DriveFile;
 }
 
-async function pullSessions(
-  ctx: vscode.ExtensionContext,
-  allProjects = false,
-): Promise<void> {
+async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
   if (!(await ensureSignedIn())) return;
   const passphrase = await getOrAskPassphrase(ctx, false);
   if (!passphrase) return;
@@ -321,32 +317,22 @@ async function pullSessions(
   const ws = currentWorkspacePath();
   if (!ws) {
     vscode.window.showWarningMessage(
-      'Chưa mở folder/workspace nào. Mở project rồi pull lại — extension chỉ pull session của project đang mở.',
+      'Chưa mở folder/workspace nào. Mở project rồi pull lại — extension cần workspace để rewrite path.',
     );
     return;
   }
-  // Match by project NAME (folder basename, lowercase) instead of
-  // project HASH because different machines have different absolute
-  // paths — `D:\Project` and `C:\dev\Project` share name but not hash.
-  // The whole point of this extension is to bridge that gap.
   const projectName = path.basename(ws).toLowerCase();
 
   let files: DriveFile[];
   try {
     statusBar.setBusy('list Drive');
     const rootId = await ensureRootFolder(folderName);
-    if (allProjects) {
-      const all = await drive.listFiles(rootId);
-      // Only show our own files (have sessionId in appProperties), not
-      // unrelated junk users may have dropped in the folder.
-      files = all.filter((f) => Boolean(f.appProperties?.sessionId));
-    } else {
-      const escapedName = projectName.replace(/'/g, "\\'");
-      files = await drive.listFiles(
-        rootId,
-        `appProperties has { key='projectName' and value='${escapedName}' }`,
-      );
-    }
+    // List every .csz file in the folder, regardless of who created
+    // it. Requires `drive.readonly` scope so we also see files the user
+    // manually copied into the folder via Drive UI (those won't have
+    // any appProperties from the extension).
+    const all = await drive.listFiles(rootId);
+    files = all.filter((f) => f.name.toLowerCase().endsWith('.csz'));
     statusBar.setBusy(null);
   } catch (e) {
     statusBar.setBusy(null);
@@ -358,17 +344,9 @@ async function pullSessions(
   }
 
   if (files.length === 0) {
-    if (allProjects) {
-      vscode.window.showWarningMessage(
-        `Không có session nào trên Drive/${folderName}. Push từ máy khác trước.`,
-      );
-    } else {
-      vscode.window.showWarningMessage(
-        `Không có session nào cho project "${projectName}" trên Drive/${folderName}. ` +
-        'Push từ máy khác trước, hoặc dùng "Pull session — tất cả project" để xem session của project khác. ' +
-        '(Lưu ý: file đẩy lên trước v0.4 không có projectName, cần re-push từ máy nguồn để pull thấy.)',
-      );
-    }
+    vscode.window.showWarningMessage(
+      `Không có file .csz nào trên Drive/${folderName}. Push từ máy khác hoặc copy file .csz vào folder này trước.`,
+    );
     return;
   }
 
@@ -382,41 +360,31 @@ async function pullSessions(
       f.name.replace(/--[a-f0-9]{8}\.csz$/, '');
     const machine = props.machine || '?';
     const sizeMB = f.size ? (Number(f.size) / 1024 / 1024).toFixed(1) + 'MB' : '';
-    // In all-projects mode, surface the source project so the user can
-    // tell sessions of different projects apart at a glance.
+    // Surface source project (when known) so the user can tell sessions
+    // from different projects apart. Files copied via Drive UI typically
+    // lose appProperties, so we show '?' for those.
     const sourceProject = props.projectName || '?';
-    const description = allProjects
-      ? `[${sourceProject}] · ${machine} · ${sizeMB}`
-      : `${machine} · ${sizeMB}`;
     return {
       label: `$(comment-discussion) ${title}`,
-      description,
+      description: `[${sourceProject}] · ${machine} · ${sizeMB}`,
       detail: f.modifiedTime ? new Date(f.modifiedTime).toLocaleString() : '',
-      picked: !allProjects, // don't pre-select all when listing other projects
+      picked: false, // never pre-select; user must explicitly pick
       file: f,
     };
   });
 
-  const placeHolder = allProjects
-    ? `Pull bất kỳ session nào (${files.length} session từ mọi project — path sẽ rewrite về workspace hiện tại)`
-    : `Chọn session để pull về (mặc định tất cả ${files.length} session)`;
-
   const picks = await vscode.window.showQuickPick(items, {
     canPickMany: true,
-    placeHolder,
+    placeHolder: `Chọn session để pull (${files.length} file .csz trên Drive — path sẽ rewrite về workspace "${projectName}")`,
     matchOnDescription: true,
     matchOnDetail: true,
   });
   if (!picks || picks.length === 0) return;
 
-  const confirmMsg = allProjects
-    ? `⚠️ Pull ${picks.length} session từ project KHÁC vào workspace hiện tại "${projectName}". ` +
-      'Path bên trong session sẽ được rewrite về máy này. ' +
-      'Session UUID trùng sẽ bị ĐÈ. Chỉ làm khi anh biết mình muốn gì. Tiếp tục?'
-    : `Pull ${picks.length} session về máy này. Session UUID trùng với hiện có sẽ bị ĐÈ. Tiếp tục?`;
-
   const confirm = await vscode.window.showWarningMessage(
-    confirmMsg,
+    `Pull ${picks.length} session vào workspace "${projectName}". ` +
+      'Path bên trong session sẽ được rewrite về máy này. ' +
+      'Session UUID trùng sẽ bị ĐÈ. Tiếp tục?',
     { modal: true },
     'Pull',
   );
@@ -518,8 +486,7 @@ async function showMenu(ctx: vscode.ExtensionContext): Promise<void> {
   const signed = await auth.isSignedIn();
   const items: Array<vscode.QuickPickItem & { cmd: string }> = [
     { label: '$(cloud-upload) Push session lên Drive', description: 'mỗi session 1 file riêng', cmd: 'claudeSync.push' },
-    { label: '$(cloud-download) Pull session từ Drive', description: 'chọn session muốn restore', cmd: 'claudeSync.pull' },
-    { label: '$(cloud-download) Pull session — tất cả project', description: 'advanced: bao gồm session của project khác', cmd: 'claudeSync.pullAny' },
+    { label: '$(cloud-download) Pull session từ Drive', description: 'list mọi .csz trong folder Drive', cmd: 'claudeSync.pull' },
     { label: '$(folder) Mở folder Drive', cmd: 'claudeSync.openDriveFolder' },
     { label: '$(key) Đặt / đổi passphrase', cmd: 'claudeSync.setPassphrase' },
     signed

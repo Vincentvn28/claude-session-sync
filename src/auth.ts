@@ -21,14 +21,24 @@ const CLIENT_SECRET = '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';
 const REDIRECT_PORT = 54321;
 const REDIRECT_URI = `http://127.0.0.1:${REDIRECT_PORT}/`;
 
-/* drive.file = only files this app creates. We never see other Drive files,
- * which (a) keeps the user safe and (b) makes the app eligible for
- * Google's verification fast track. */
+/* Two scopes:
+ *  - drive.file       : files this app creates (used for push/upload/delete).
+ *  - drive.readonly   : read all the user's Drive files (used for the pull
+ *                       listing). Without this we can't see files the user
+ *                       manually copied into the ClaudeCodeSync folder via
+ *                       Drive UI, because drive.file scope only exposes
+ *                       files originally created by the app itself.
+ *
+ * drive.readonly is a "restricted" Google scope: works for up to 100 users
+ * while in unverified mode; full Google verification is required to scale
+ * beyond that.
+ */
 const SCOPES = [
   'openid',
   'email',
   'profile',
   'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive.readonly',
 ];
 
 const SECRET_KEY = 'claudeSync.googleTokens';

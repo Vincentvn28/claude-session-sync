@@ -2,7 +2,7 @@
   "name": "claude-session-sync",
   "displayName": "Claude Session Sync",
   "description": "Sync Claude Code sessions (chat history + memory + plans) across machines via Google Drive — 1-click push/pull, AES-256 encrypted.",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "publisher": "Vincentvn28",
   "engines": {
     "vscode": "^1.85.0"
@@ -26,12 +26,7 @@
       },
       {
         "command": "claudeSync.pull",
-        "title": "Claude Sync: Pull session from Google Drive (multi-select)",
-        "category": "Claude Sync"
-      },
-      {
-        "command": "claudeSync.pullAny",
-        "title": "Claude Sync: Pull session from Google Drive (all projects, advanced)",
+        "title": "Claude Sync: Pull session from Google Drive",
         "category": "Claude Sync"
       },
       {
