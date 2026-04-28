@@ -1,9 +1,9 @@
 {
   "name": "claude-session-sync",
   "displayName": "Claude Session Sync",
-  "description": "Đồng bộ Claude Code session (chat history + memory + plans) giữa các máy qua Google Drive — 1 click push/pull, mã hoá AES-256.",
-  "version": "0.3.0",
-  "publisher": "Claudesessionsync",
+  "description": "Sync Claude Code sessions (chat history + memory + plans) across machines via Google Drive — 1-click push/pull, AES-256 encrypted.",
+  "version": "0.4.0",
+  "publisher": "Vincentvn28",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -21,37 +21,37 @@
     "commands": [
       {
         "command": "claudeSync.push",
-        "title": "Claude Sync: Push session lên Google Drive (mỗi session 1 file)",
+        "title": "Claude Sync: Push session to Google Drive (one file per session)",
         "category": "Claude Sync"
       },
       {
         "command": "claudeSync.pull",
-        "title": "Claude Sync: Pull session từ Google Drive (chọn nhiều)",
+        "title": "Claude Sync: Pull session from Google Drive (multi-select)",
         "category": "Claude Sync"
       },
       {
         "command": "claudeSync.signIn",
-        "title": "Claude Sync: Đăng nhập Google",
+        "title": "Claude Sync: Sign in with Google",
         "category": "Claude Sync"
       },
       {
         "command": "claudeSync.signOut",
-        "title": "Claude Sync: Đăng xuất Google",
+        "title": "Claude Sync: Sign out",
         "category": "Claude Sync"
       },
       {
         "command": "claudeSync.setPassphrase",
-        "title": "Claude Sync: Đặt / đổi passphrase mã hoá",
+        "title": "Claude Sync: Set / change encryption passphrase",
         "category": "Claude Sync"
       },
       {
         "command": "claudeSync.openDriveFolder",
-        "title": "Claude Sync: Mở folder Drive trong browser",
+        "title": "Claude Sync: Open Drive folder in browser",
         "category": "Claude Sync"
       },
       {
         "command": "claudeSync.showMenu",
-        "title": "Claude Sync: Hiện menu",
+        "title": "Claude Sync: Show menu",
         "category": "Claude Sync"
       }
     ],
@@ -61,17 +61,17 @@
         "claudeSync.driveFolderName": {
           "type": "string",
           "default": "ClaudeCodeSync",
-          "description": "Tên folder gốc trên Google Drive để lưu session."
+          "description": "Root folder name on Google Drive for storing sessions."
         },
         "claudeSync.includeSettings": {
           "type": "boolean",
           "default": false,
-          "description": "Có bao gồm settings.json của Claude (chứa hooks/keys) trong file đẩy lên không. Mặc định: tắt."
+          "description": "Include Claude's settings.json (which contains hooks/keys) in uploads. Default: off."
         },
         "claudeSync.autoPushOnExit": {
           "type": "boolean",
           "default": false,
-          "description": "Tự động push session khi đóng cửa sổ. Lưu ý: làm chậm thao tác đóng app."
+          "description": "Auto-push session when closing the window. Note: slows down app close."
         }
       }
     }
