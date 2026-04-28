@@ -4,19 +4,19 @@ import * as crypto from 'crypto';
 import { URL } from 'url';
 
 /*
- * Embedded OAuth client. This is the same `cad-translator-auth` client
- * project the Python desktop app uses (see core/_google_creds.py). For
- * installed / native apps Google explicitly allows the client_secret
+ * Embedded OAuth client for the `claude-session-sync` Google Cloud project.
+ * For installed / native apps Google explicitly allows the client_secret
  * to be distributed in source — see
  * https://developers.google.com/identity/protocols/oauth2#installed.
  *
- * The ONLY new thing required in Google Cloud Console:
- *   1. Enable the Drive API on the cad-translator-auth project
- *   2. Add the `auth/drive.file` scope on the OAuth consent screen
+ * Project setup (one-time, already done):
+ *   1. Drive API enabled on the claude-session-sync project
+ *   2. `auth/drive.file` scope added on the OAuth consent screen
+ *   3. Consent screen published (unverified, capped at 100 users)
  */
 const CLIENT_ID =
-  '148054451554-vumej795npc8brg64ll0n6vj0feligq4.apps.googleusercontent.com';
-const CLIENT_SECRET = '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';
+  '324073497482-udgl8cd8d63r6vvovf1tbl2tt9purc9v.apps.googleusercontent.com';
+const CLIENT_SECRET = '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';
 
 const REDIRECT_PORT = 54321;
 const REDIRECT_URI = `http://127.0.0.1:${REDIRECT_PORT}/`;
