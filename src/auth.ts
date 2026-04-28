@@ -21,24 +21,17 @@ const CLIENT_SECRET = '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';
 const REDIRECT_PORT = 54321;
 const REDIRECT_URI = `http://127.0.0.1:${REDIRECT_PORT}/`;
 
-/* Two scopes:
- *  - drive.file       : files this app creates (used for push/upload/delete).
- *  - drive.readonly   : read all the user's Drive files (used for the pull
- *                       listing). Without this we can't see files the user
- *                       manually copied into the ClaudeCodeSync folder via
- *                       Drive UI, because drive.file scope only exposes
- *                       files originally created by the app itself.
- *
- * drive.readonly is a "restricted" Google scope: works for up to 100 users
- * while in unverified mode; full Google verification is required to scale
- * beyond that.
+/* Single non-sensitive scope. Trade-offs vs. broader scopes:
+ *  + No Google verification ever required (drive.file is non-sensitive,
+ *    no CASA security audit, no user cap beyond Google's defaults).
+ *  + Consent screen shows just one permission line — minimal user friction.
+ *  - The extension can ONLY see files it created itself; files manually
+ *    copied into the ClaudeCodeSync folder via the Drive UI are invisible.
+ *    For those, use the "Import session from local file" command after
+ *    downloading the .csz from Drive.
  */
 const SCOPES = [
-  'openid',
-  'email',
-  'profile',
   'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive.readonly',
 ];
 
 const SECRET_KEY = 'claudeSync.googleTokens';
@@ -47,7 +40,6 @@ interface StoredTokens {
   access_token: string;
   refresh_token: string;
   expires_at: number;
-  email?: string;
   scope: string;
 }
 
@@ -67,7 +59,9 @@ export class GoogleAuth {
   }
 
   async getEmail(): Promise<string | undefined> {
-    return (await this.loadTokens())?.email;
+    // Email no longer fetched (we don't request profile/email scope to
+    // keep the consent screen minimal). Kept as no-op for API stability.
+    return undefined;
   }
 
   async signOut(): Promise<void> {
@@ -99,17 +93,15 @@ export class GoogleAuth {
 
     const code = await this.captureLoopbackCode(authUrl.toString(), state);
     const tokens = await this.exchangeCodeForTokens(code, verifier);
-    const email = await this.fetchEmail(tokens.access_token).catch(() => undefined);
 
     const stored: StoredTokens = {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token ?? '',
       expires_at: Date.now() + tokens.expires_in * 1000 - 60_000,
-      email,
       scope: tokens.scope,
     };
     await this.secrets.store(SECRET_KEY, JSON.stringify(stored));
-    return email ?? '';
+    return '';
   }
 
   /**
@@ -271,15 +263,6 @@ export class GoogleAuth {
       throw new Error(`Refresh token failed: ${r.status} ${await r.text()}`);
     }
     return (await r.json()) as TokenResponse;
-  }
-
-  private async fetchEmail(accessToken: string): Promise<string | undefined> {
-    const r = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    if (!r.ok) return undefined;
-    const j = (await r.json()) as { email?: string };
-    return j.email;
   }
 }
 

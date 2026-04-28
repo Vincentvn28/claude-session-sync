@@ -56,6 +56,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.commands.registerCommand('claudeSync.signOut', () => signOut()),
     vscode.commands.registerCommand('claudeSync.push', () => pushSessions(ctx)),
     vscode.commands.registerCommand('claudeSync.pull', () => pullSessions(ctx)),
+    vscode.commands.registerCommand('claudeSync.importFile', () => importLocalFile(ctx)),
     vscode.commands.registerCommand('claudeSync.setPassphrase', () => setPassphrase(ctx)),
     vscode.commands.registerCommand('claudeSync.openDriveFolder', () => openDriveFolder()),
     vscode.commands.registerCommand('claudeSync.showMenu', () => showMenu(ctx)),
@@ -468,6 +469,113 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
   }
 }
 
+async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
+  const ws = currentWorkspacePath();
+  if (!ws) {
+    vscode.window.showWarningMessage(
+      'Chưa mở folder/workspace nào. Mở project rồi import lại — extension cần workspace để rewrite path.',
+    );
+    return;
+  }
+
+  const passphrase = await getOrAskPassphrase(ctx, false);
+  if (!passphrase) return;
+
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFiles: true,
+    canSelectFolders: false,
+    canSelectMany: true,
+    openLabel: 'Import',
+    title: 'Chọn file .csz để import',
+    filters: { 'Claude Sync Encrypted': ['csz'] },
+  });
+  if (!picked || picked.length === 0) return;
+
+  const projectName = path.basename(ws);
+  const confirm = await vscode.window.showWarningMessage(
+    `Import ${picked.length} file vào workspace "${projectName}". ` +
+      'Path bên trong session sẽ được rewrite về máy này. ' +
+      'Session UUID trùng sẽ bị ĐÈ. Tiếp tục?',
+    { modal: true },
+    'Import',
+  );
+  if (confirm !== 'Import') return;
+
+  let succeeded = 0;
+  let overwrote = 0;
+  let failed = 0;
+  let pathRewrites = 0;
+
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: 'Claude Sync · Import', cancellable: true },
+    async (progress, token) => {
+      const total = picked.length;
+      for (let i = 0; i < total; i++) {
+        if (token.isCancellationRequested) {
+          logInfo(`import cancelled at ${i}/${total}`);
+          break;
+        }
+        const f = picked[i];
+        const baseName = path.basename(f.fsPath);
+        progress.report({
+          message: `(${i + 1}/${total}) ${baseName}`,
+          increment: 100 / total,
+        });
+        statusBar.setBusy(`import ${i + 1}/${total}`);
+
+        const plainZip = path.join(os.tmpdir(), `csync-import-${i}-${Date.now()}.zip`);
+        try {
+          await decryptFile(f.fsPath, plainZip, passphrase);
+          const r = await importOneSession({
+            zipPath: plainZip,
+            targetWorkspacePath: ws,
+          });
+          succeeded++;
+          if (r.overwrote) overwrote++;
+          pathRewrites += r.pathRewrites;
+          logInfo(
+            `import ok · ${baseName} → ${r.jsonlPath}` +
+            (r.overwrote ? ' (overwrote)' : '') +
+            (r.pathRewrites > 0 ? ` (${r.pathRewrites} path rewrites)` : ''),
+          );
+        } catch (e) {
+          failed++;
+          logError(`import failed · ${baseName}`, e);
+        } finally {
+          await fs.promises.unlink(plainZip).catch(() => {});
+        }
+      }
+    },
+  );
+
+  statusBar.setBusy(null);
+  if (succeeded > 0) {
+    lastSyncMs = Date.now();
+    statusBar.setLastSync(lastSyncMs);
+    ctx.globalState.update(LAST_SYNC_KEY, lastSyncMs);
+  }
+
+  const summary =
+    `${succeeded} session OK` +
+    (overwrote > 0 ? ` (${overwrote} đè cũ)` : '') +
+    (pathRewrites > 0 ? ` · ${pathRewrites} path rewritten` : '') +
+    (failed > 0 ? ` · ${failed} fail` : '');
+
+  if (succeeded > 0) {
+    const reload = await vscode.window.showInformationMessage(
+      `✅ Import xong: ${summary}. Reload window để Claude Code nhận session mới.`,
+      'Reload Window',
+    );
+    if (reload === 'Reload Window') {
+      vscode.commands.executeCommand('workbench.action.reloadWindow');
+    }
+  } else {
+    vscode.window.showErrorMessage(
+      `Import thất bại: ${summary}. Xem Output → "Claude Session Sync".`,
+    );
+  }
+}
+
 async function openDriveFolder(): Promise<void> {
   if (!(await ensureSignedIn())) return;
   const folderName = vscode.workspace.getConfiguration('claudeSync')
@@ -487,6 +595,7 @@ async function showMenu(ctx: vscode.ExtensionContext): Promise<void> {
   const items: Array<vscode.QuickPickItem & { cmd: string }> = [
     { label: '$(cloud-upload) Push session lên Drive', description: 'mỗi session 1 file riêng', cmd: 'claudeSync.push' },
     { label: '$(cloud-download) Pull session từ Drive', description: 'list mọi .csz trong folder Drive', cmd: 'claudeSync.pull' },
+    { label: '$(file-zip) Import session từ file .csz local', description: 'cho file copy bằng tay / tải về máy', cmd: 'claudeSync.importFile' },
     { label: '$(folder) Mở folder Drive', cmd: 'claudeSync.openDriveFolder' },
     { label: '$(key) Đặt / đổi passphrase', cmd: 'claudeSync.setPassphrase' },
     signed
