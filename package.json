@@ -3,7 +3,7 @@
   "displayName": "Claude Session Sync",
   "description": "Đồng bộ Claude Code session (chat history + memory + plans) giữa các máy qua Google Drive — 1 click push/pull, mã hoá AES-256.",
   "version": "0.3.0",
-  "publisher": "opencads",
+  "publisher": "Claudesessionsync",
   "engines": {
     "vscode": "^1.85.0"
   },
