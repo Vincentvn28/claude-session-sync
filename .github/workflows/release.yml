@@ -41,7 +41,7 @@ jobs:
         if: ${{ env.OVSX_PAT != '' }}
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx --no ovsx publish claude-session-sync.vsix -p "$OVSX_PAT"
+        run: npx --yes ovsx publish claude-session-sync.vsix -p "$OVSX_PAT"
 
       # Đính kèm VSIX vào GitHub Release để user có thể tải về cài tay
       - name: Attach VSIX to GitHub Release
