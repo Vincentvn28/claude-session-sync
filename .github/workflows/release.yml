@@ -1,0 +1,52 @@
+name: Release
+
+# Trigger 1: tự động khi push tag bắt đầu bằng `v` (vd `v0.3.1`, `v1.0.0`)
+# Trigger 2: thủ công từ tab Actions trên GitHub
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # cần để tạo GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Package VSIX
+        run: npx --no -- vsce package --no-dependencies --out claude-session-sync.vsix
+
+      # Publish lên VS Code Marketplace (cho user dùng VS Code chính chủ)
+      - name: Publish to VS Code Marketplace
+        if: ${{ env.VSCE_PAT != '' }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --no -- vsce publish --no-dependencies --packagePath claude-session-sync.vsix
+
+      # Publish lên Open VSX (cho Antigravity, Cursor, Windsurf, VSCodium...)
+      - name: Publish to Open VSX
+        if: ${{ env.OVSX_PAT != '' }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx --no ovsx publish claude-session-sync.vsix -p "$OVSX_PAT"
+
+      # Đính kèm VSIX vào GitHub Release để user có thể tải về cài tay
+      - name: Attach VSIX to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: claude-session-sync.vsix
+          generate_release_notes: true
