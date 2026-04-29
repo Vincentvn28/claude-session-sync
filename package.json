@@ -1,8 +1,8 @@
 {
   "name": "claude-session-sync",
   "displayName": "Claude Session Sync",
-  "description": "Sync Claude Code sessions (chat history + memory + plans) across machines via Google Drive — 1-click push/pull, AES-256 encrypted.",
-  "version": "0.7.3",
+  "description": "Sync Claude Code sessions (chat history + memory + plans) across machines via Google Drive — 1-click push/pull.",
+  "version": "0.8.0",
   "publisher": "Vincentvn28",
   "engines": {
     "vscode": "^1.85.0"
@@ -42,11 +42,6 @@
       {
         "command": "claudeSync.signOut",
         "title": "Claude Sync: Sign out",
-        "category": "Claude Sync"
-      },
-      {
-        "command": "claudeSync.setPassphrase",
-        "title": "Claude Sync: Set / change encryption passphrase",
         "category": "Claude Sync"
       },
       {

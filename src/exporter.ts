@@ -162,7 +162,7 @@ function extractFirstUserText(obj: any): string {
 }
 
 /**
- * Build a human-readable Drive filename: `YYYYMMDD HHmm <title>.csz`
+ * Build a human-readable Drive filename: `YYYYMMDD HHmm <title>.zip`
  * (local time of the session's last modification). Identity for
  * re-push deduplication lives in Drive `appProperties.sessionId`, not
  * in the filename — so the name is purely for display/sort.
@@ -184,7 +184,7 @@ export function buildSessionFileName(title: string, modifiedMs: number): string 
     .trim();
   if (stem.length > 80) stem = stem.slice(0, 80).trim();
   if (!stem) stem = 'untitled';
-  return `${stamp} ${stem}.csz`;
+  return `${stamp} ${stem}.zip`;
 }
 
 /**

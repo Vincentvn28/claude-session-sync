@@ -5,14 +5,12 @@ import * as os from 'os';
 import { GoogleAuth } from './auth';
 import { DriveClient, DriveFile } from './drive';
 import { listAllSessions, exportOneSession, SessionInfo } from './exporter';
-import { importOneSession, ImportSessionResult } from './importer';
-import { encryptFile, decryptFile } from './crypto';
+import { importOneSession } from './importer';
 import { SyncStatusBar } from './statusBar';
 import { machineId, getClaudeProjectHash, listKnownProjects } from './pathUtils';
 
-const PASSPHRASE_KEY = 'claudeSync.passphrase';
 const LAST_SYNC_KEY = 'claudeSync.lastSync';
-const FILE_EXT = '.csz';
+const FILE_EXT = '.zip';
 
 let auth: GoogleAuth;
 let drive: DriveClient;
@@ -57,7 +55,6 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.commands.registerCommand('claudeSync.push', () => pushSessions(ctx)),
     vscode.commands.registerCommand('claudeSync.pull', () => pullSessions(ctx)),
     vscode.commands.registerCommand('claudeSync.importFile', () => importLocalFile(ctx)),
-    vscode.commands.registerCommand('claudeSync.setPassphrase', () => setPassphrase(ctx)),
     vscode.commands.registerCommand('claudeSync.openDriveFolder', () => openDriveFolder()),
     vscode.commands.registerCommand('claudeSync.showMenu', () => showMenu(ctx)),
   );
@@ -107,45 +104,6 @@ async function ensureSignedIn(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-async function getOrAskPassphrase(
-  ctx: vscode.ExtensionContext,
-  forNew: boolean,
-): Promise<string | null> {
-  let pass = await ctx.secrets.get(PASSPHRASE_KEY);
-  if (pass) return pass;
-
-  const prompt = forNew
-    ? 'Set encryption passphrase (≥ 8 characters). Losing the passphrase = losing access to all uploaded files.'
-    : 'Enter the passphrase you set when first pushing a session.';
-  pass = await vscode.window.showInputBox({
-    prompt,
-    password: true,
-    ignoreFocusOut: true,
-    validateInput: (v) => (v.length < 8 ? 'At least 8 characters required.' : null),
-  });
-  if (!pass) return null;
-
-  if (forNew) {
-    const confirm = await vscode.window.showInputBox({
-      prompt: 'Re-enter the passphrase to confirm.',
-      password: true,
-      ignoreFocusOut: true,
-    });
-    if (confirm !== pass) {
-      vscode.window.showErrorMessage('Passphrases do not match.');
-      return null;
-    }
-  }
-  await ctx.secrets.store(PASSPHRASE_KEY, pass);
-  return pass;
-}
-
-async function setPassphrase(ctx: vscode.ExtensionContext): Promise<void> {
-  await ctx.secrets.delete(PASSPHRASE_KEY);
-  await getOrAskPassphrase(ctx, true);
-  vscode.window.showInformationMessage('New passphrase saved.');
 }
 
 async function ensureRootFolder(folderName: string): Promise<string> {
@@ -198,9 +156,6 @@ async function pushSessions(ctx: vscode.ExtensionContext): Promise<void> {
   const sessions = await pickSessionsToPush();
   if (!sessions) return;
 
-  const passphrase = await getOrAskPassphrase(ctx, true);
-  if (!passphrase) return;
-
   const folderName = vscode.workspace.getConfiguration('claudeSync')
     .get<string>('driveFolderName') || 'ClaudeCodeSync';
   const includeSettings = vscode.workspace.getConfiguration('claudeSync')
@@ -231,10 +186,8 @@ async function pushSessions(ctx: vscode.ExtensionContext): Promise<void> {
           statusBar.setBusy(`push ${i + 1}/${total}`);
 
           const tempZip = path.join(os.tmpdir(), `csync-${s.sessionId}.zip`);
-          const encZip = path.join(os.tmpdir(), `csync-${s.sessionId}${FILE_EXT}`);
           try {
             const exp = await exportOneSession(s, tempZip, includeSettings);
-            await encryptFile(tempZip, encZip, passphrase);
 
             // Replace existing Drive file for this sessionId so re-pushes
             // overwrite cleanly instead of accumulating duplicates.
@@ -245,16 +198,16 @@ async function pushSessions(ctx: vscode.ExtensionContext): Promise<void> {
               });
             }
 
-            const stat = await fs.promises.stat(encZip);
+            const stat = await fs.promises.stat(tempZip);
             const projectName = s.sourcePath
               ? path.basename(s.sourcePath).toLowerCase()
               : '';
             await drive.uploadFile(
-              encZip,
+              tempZip,
               rootId,
               s.fileName,
               {
-                schema: 'claude-session-sync/v3',
+                schema: 'claude-session-sync/v4',
                 sessionId: s.sessionId,
                 projectHash: s.projectHash,
                 projectName,
@@ -272,7 +225,6 @@ async function pushSessions(ctx: vscode.ExtensionContext): Promise<void> {
             logError(`push failed · ${s.fileName}`, e);
           } finally {
             await fs.promises.unlink(tempZip).catch(() => {});
-            await fs.promises.unlink(encZip).catch(() => {});
           }
         }
       },
@@ -310,8 +262,6 @@ interface RemotePickItem extends vscode.QuickPickItem {
 
 async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
   if (!(await ensureSignedIn())) return;
-  const passphrase = await getOrAskPassphrase(ctx, false);
-  if (!passphrase) return;
 
   const folderName = vscode.workspace.getConfiguration('claudeSync')
     .get<string>('driveFolderName') || 'ClaudeCodeSync';
@@ -328,12 +278,11 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
   try {
     statusBar.setBusy('list Drive');
     const rootId = await ensureRootFolder(folderName);
-    // List every .csz file in the folder, regardless of who created
-    // it. Requires `drive.readonly` scope so we also see files the user
-    // manually copied into the folder via Drive UI (those won't have
-    // any appProperties from the extension).
+    // List every .zip file in the folder. With `drive.file` scope we
+    // only see files this app created — manual Drive-UI copies won't
+    // appear here; those go through the "Import from local file" flow.
     const all = await drive.listFiles(rootId);
-    files = all.filter((f) => f.name.toLowerCase().endsWith('.csz'));
+    files = all.filter((f) => f.name.toLowerCase().endsWith('.zip'));
     statusBar.setBusy(null);
   } catch (e) {
     statusBar.setBusy(null);
@@ -346,7 +295,7 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
 
   if (files.length === 0) {
     vscode.window.showWarningMessage(
-      `No .csz files found in Drive/${folderName}. Push from another machine first.`,
+      `No .zip files found in Drive/${folderName}. Push from another machine first.`,
     );
     return;
   }
@@ -355,10 +304,8 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
     const props = f.appProperties ?? {};
     const title =
       props.title ||
-      // New format: `YYYYMMDD HHmm <title>.csz`
-      f.name.replace(/^\d{8} \d{4} /, '').replace(/\.csz$/, '') ||
-      // Legacy format: `<title>--<uuid8>.csz`
-      f.name.replace(/--[a-f0-9]{8}\.csz$/, '');
+      // New format: `YYYYMMDD HHmm <title>.zip`
+      f.name.replace(/^\d{8} \d{4} /, '').replace(/\.zip$/, '');
     const machine = props.machine || '?';
     const sizeMB = f.size ? (Number(f.size) / 1024 / 1024).toFixed(1) + 'MB' : '';
     // Surface source project (when known) so the user can tell sessions
@@ -376,7 +323,7 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
 
   const picks = await vscode.window.showQuickPick(items, {
     canPickMany: true,
-    placeHolder: `Pick sessions to pull (${files.length} .csz file(s) on Drive — paths will be rewritten to workspace "${projectName}")`,
+    placeHolder: `Pick sessions to pull (${files.length} .zip file(s) on Drive — paths will be rewritten to workspace "${projectName}")`,
     matchOnDescription: true,
     matchOnDetail: true,
   });
@@ -413,13 +360,11 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
         statusBar.setBusy(`pull ${i + 1}/${total}`);
 
         const safeFn = f.name.replace(/[\\\/:*?"<>|]/g, '_');
-        const encZip = path.join(os.tmpdir(), `csync-pull-${i}-${safeFn}`);
-        const plainZip = encZip.replace(/\.csz$/, '.zip');
+        const localZip = path.join(os.tmpdir(), `csync-pull-${i}-${safeFn}`);
         try {
-          await drive.downloadFile(f.id, encZip);
-          await decryptFile(encZip, plainZip, passphrase);
+          await drive.downloadFile(f.id, localZip);
           const r = await importOneSession({
-            zipPath: plainZip,
+            zipPath: localZip,
             targetWorkspacePath: ws ?? undefined,
           });
           succeeded++;
@@ -434,8 +379,7 @@ async function pullSessions(ctx: vscode.ExtensionContext): Promise<void> {
           failed++;
           logError(`pull failed · ${f.name}`, e);
         } finally {
-          await fs.promises.unlink(encZip).catch(() => {});
-          await fs.promises.unlink(plainZip).catch(() => {});
+          await fs.promises.unlink(localZip).catch(() => {});
         }
       }
     },
@@ -528,51 +472,14 @@ async function pickTargetProject(): Promise<string | null> {
   return picked[0].fsPath;
 }
 
-function isWrongPassphraseError(e: unknown): boolean {
-  return e instanceof Error && /wrong passphrase|file is corrupted/i.test(e.message);
-}
-
-async function promptAlternatePassphrase(fileName: string): Promise<string | null> {
-  const v = await vscode.window.showInputBox({
-    prompt: `Decryption failed for "${fileName}". This file was likely encrypted with a different passphrase. Enter that passphrase to retry:`,
-    password: true,
-    ignoreFocusOut: true,
-    validateInput: (s) => (s.length < 8 ? 'At least 8 characters required.' : null),
-  });
-  return v ?? null;
-}
-
-async function decryptAndImport(
-  filePath: string,
-  passphrase: string,
-  targetWs: string,
-  tag: string,
-): Promise<{ result: ImportSessionResult }> {
-  const plainZip = path.join(os.tmpdir(), `csync-import-${tag}-${Date.now()}.zip`);
-  try {
-    await decryptFile(filePath, plainZip, passphrase);
-    const result = await importOneSession({
-      zipPath: plainZip,
-      targetWorkspacePath: targetWs,
-    });
-    return { result };
-  } finally {
-    await fs.promises.unlink(plainZip).catch(() => {});
-  }
-}
-
 async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
-  const initialPassphrase = await getOrAskPassphrase(ctx, false);
-  if (!initialPassphrase) return;
-  let passphrase: string = initialPassphrase;
-
   const picked = await vscode.window.showOpenDialog({
     canSelectFiles: true,
     canSelectFolders: false,
     canSelectMany: true,
     openLabel: 'Import',
-    title: 'Pick .csz file(s) to import',
-    filters: { 'Claude Sync Encrypted': ['csz'] },
+    title: 'Pick .zip file(s) to import',
+    filters: { 'Claude Sync session': ['zip'] },
   });
   if (!picked || picked.length === 0) return;
 
@@ -597,7 +504,6 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
   let overwrote = 0;
   let failed = 0;
   let pathRewrites = 0;
-  let alternatePassphraseUsed = false;
 
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'Claude Sync · Import', cancellable: true },
@@ -616,34 +522,11 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
         });
         statusBar.setBusy(`import ${i + 1}/${total}`);
 
-        let r: ImportSessionResult | null = null;
         try {
-          ({ result: r } = await decryptAndImport(f.fsPath, passphrase, target, String(i)));
-        } catch (e) {
-          if (isWrongPassphraseError(e)) {
-            // Stored passphrase doesn't match this file. Offer a one-shot
-            // re-prompt; the new value applies to this and remaining files.
-            const alt = await promptAlternatePassphrase(baseName);
-            if (alt) {
-              try {
-                ({ result: r } = await decryptAndImport(f.fsPath, alt, target, String(i) + '-retry'));
-                passphrase = alt;
-                alternatePassphraseUsed = true;
-              } catch (retryErr) {
-                failed++;
-                logError(`import failed (after retry) · ${baseName}`, retryErr);
-              }
-            } else {
-              failed++;
-              logError(`import failed · ${baseName}`, e);
-            }
-          } else {
-            failed++;
-            logError(`import failed · ${baseName}`, e);
-          }
-        }
-
-        if (r) {
+          const r = await importOneSession({
+            zipPath: f.fsPath,
+            targetWorkspacePath: target,
+          });
           succeeded++;
           if (r.overwrote) overwrote++;
           pathRewrites += r.pathRewrites;
@@ -652,21 +535,13 @@ async function importLocalFile(ctx: vscode.ExtensionContext): Promise<void> {
             (r.overwrote ? ' (overwrote)' : '') +
             (r.pathRewrites > 0 ? ` (${r.pathRewrites} path rewrites)` : ''),
           );
+        } catch (e) {
+          failed++;
+          logError(`import failed · ${baseName}`, e);
         }
       }
     },
   );
-
-  if (alternatePassphraseUsed && succeeded > 0) {
-    const save = await vscode.window.showInformationMessage(
-      'The alternate passphrase worked. Save it as your stored passphrase for future operations?',
-      'Save',
-      'Just for this import',
-    );
-    if (save === 'Save') {
-      await ctx.secrets.store(PASSPHRASE_KEY, passphrase);
-    }
-  }
 
   statusBar.setBusy(null);
   if (succeeded > 0) {
@@ -728,10 +603,9 @@ async function showMenu(ctx: vscode.ExtensionContext): Promise<void> {
   const signed = await auth.isSignedIn();
   const items: Array<vscode.QuickPickItem & { cmd: string }> = [
     { label: '$(cloud-upload) Push session to Drive', description: 'one file per session', cmd: 'claudeSync.push' },
-    { label: '$(cloud-download) Pull session from Drive', description: 'list all .csz in the Drive folder', cmd: 'claudeSync.pull' },
-    { label: '$(file-zip) Import session from local .csz file', description: 'for manually copied / downloaded files', cmd: 'claudeSync.importFile' },
+    { label: '$(cloud-download) Pull session from Drive', description: 'list all .zip in the Drive folder', cmd: 'claudeSync.pull' },
+    { label: '$(file-zip) Import session from local .zip file', description: 'for manually copied / downloaded files', cmd: 'claudeSync.importFile' },
     { label: '$(folder) Open Drive folder', cmd: 'claudeSync.openDriveFolder' },
-    { label: '$(key) Set / change passphrase', cmd: 'claudeSync.setPassphrase' },
     signed
       ? { label: '$(sign-out) Sign out of Google', description: await auth.getEmail(), cmd: 'claudeSync.signOut' }
       : { label: '$(sign-in) Sign in with Google', cmd: 'claudeSync.signIn' },
