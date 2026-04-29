@@ -53,6 +53,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.commands.registerCommand('claudeSync.signIn', () => signIn()),
     vscode.commands.registerCommand('claudeSync.signOut', () => signOut()),
     vscode.commands.registerCommand('claudeSync.push', () => pushSessions(ctx)),
+    vscode.commands.registerCommand('claudeSync.exportLocal', () => exportLocalFiles(ctx)),
     vscode.commands.registerCommand('claudeSync.pull', () => pullSessions(ctx)),
     vscode.commands.registerCommand('claudeSync.importFile', () => importLocalFile(ctx)),
     vscode.commands.registerCommand('claudeSync.openDriveFolder', () => openDriveFolder()),
@@ -252,6 +253,76 @@ async function pushSessions(ctx: vscode.ExtensionContext): Promise<void> {
     logError('push (top-level) failed', e);
     vscode.window.showErrorMessage(
       `Push failed: ${(e as Error).message}. See Output → "Claude Session Sync".`,
+    );
+  }
+}
+
+async function exportLocalFiles(ctx: vscode.ExtensionContext): Promise<void> {
+  const sessions = await pickSessionsToPush();
+  if (!sessions) return;
+
+  const outDirPick = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    openLabel: 'Save here',
+    title: 'Pick output folder for the .zip backups',
+  });
+  if (!outDirPick || outDirPick.length === 0) return;
+  const outPath = outDirPick[0].fsPath;
+
+  const includeSettings = vscode.workspace.getConfiguration('claudeSync')
+    .get<boolean>('includeSettings') ?? false;
+
+  let succeeded = 0;
+  let failed = 0;
+  let totalBytes = 0;
+
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: 'Claude Sync · Export', cancellable: true },
+    async (progress, token) => {
+      const total = sessions.length;
+      for (let i = 0; i < total; i++) {
+        if (token.isCancellationRequested) {
+          logInfo(`export cancelled at ${i}/${total}`);
+          break;
+        }
+        const s = sessions[i];
+        progress.report({
+          message: `(${i + 1}/${total}) ${s.title || s.sessionId.slice(0, 8)}`,
+          increment: 100 / total,
+        });
+        statusBar.setBusy(`export ${i + 1}/${total}`);
+
+        const outFile = path.join(outPath, s.fileName);
+        try {
+          const exp = await exportOneSession(s, outFile, includeSettings);
+          totalBytes += exp.sizeBytes;
+          succeeded++;
+          logInfo(`export ok · ${s.fileName} (${(exp.sizeBytes / 1024 / 1024).toFixed(2)}MB)`);
+        } catch (e) {
+          failed++;
+          logError(`export failed · ${s.fileName}`, e);
+        }
+      }
+    },
+  );
+
+  statusBar.setBusy(null);
+
+  const totalMB = (totalBytes / 1024 / 1024).toFixed(1);
+  if (succeeded > 0) {
+    const action = await vscode.window.showInformationMessage(
+      `✅ Export complete: ${succeeded} session(s) · ${totalMB}MB → ${outPath}` +
+        (failed > 0 ? ` · ${failed} failed` : ''),
+      'Show in Explorer',
+    );
+    if (action === 'Show in Explorer') {
+      vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(outPath));
+    }
+  } else {
+    vscode.window.showErrorMessage(
+      `Export failed: ${failed} failed. See Output → "Claude Session Sync".`,
     );
   }
 }
@@ -603,6 +674,7 @@ async function showMenu(ctx: vscode.ExtensionContext): Promise<void> {
   const signed = await auth.isSignedIn();
   const items: Array<vscode.QuickPickItem & { cmd: string }> = [
     { label: '$(cloud-upload) Push session to Drive', description: 'one file per session', cmd: 'claudeSync.push' },
+    { label: '$(save) Export session to local .zip', description: 'backup to a folder of your choice (USB, NAS, anywhere)', cmd: 'claudeSync.exportLocal' },
     { label: '$(cloud-download) Pull session from Drive', description: 'list all .zip in the Drive folder', cmd: 'claudeSync.pull' },
     { label: '$(file-zip) Import session from local .zip file', description: 'for manually copied / downloaded files', cmd: 'claudeSync.importFile' },
     { label: '$(folder) Open Drive folder', cmd: 'claudeSync.openDriveFolder' },

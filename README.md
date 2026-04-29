@@ -6,9 +6,10 @@ Sync Claude Code sessions (chat history + memory + plans) across machines via Go
 ## Features
 
 - ☁️ **Narrow Drive scope** — uses `drive.file` so the extension can only see files it created itself, never your other Drive files.
+- 💾 **Local backup option** — don't want Drive at all? Export sessions to any folder (USB, NAS, Dropbox, …) as plain `.zip` files. Import them back the same way.
 - 🧠 **Auto-fix path mismatch** — home machine at `D:\Project`, work machine at `C:\dev\Project`? On pull the extension rewrites paths inside the JSONL automatically.
 - 🔁 **Choose snapshot on pull** — never auto-overwrites the current machine; you pick which version to restore.
-- 📦 **Import from local file** — pick any `.zip` exported by the extension and import it into a target project of your choice (current workspace, a detected project, or any folder).
+- 📦 **Import into any project** — local `.zip` import lets you choose the target (current workspace, a detected project, or any folder you Browse to).
 - 🆔 **Correct folder hashing** — uses the same algorithm Claude Code uses internally (lowercase drive letter, all non-alphanumeric → `-`), fixing the wrong-hash bug present in legacy PowerShell scripts.
 
 ## Install
@@ -46,6 +47,16 @@ code --install-extension claude-session-sync.vsix
 
 The extension exports the session and uploads it to `Google Drive/ClaudeCodeSync/<file>.zip`.
 
+### Export to local file (backup without Drive)
+
+Don't want to use Google Drive? Want a USB / NAS / external-disk backup? Use Export instead of Push:
+
+- Click `☁` → **"Export session to local .zip"**
+- Pick session(s) to back up → pick output folder (USB drive, Dropbox folder, anywhere)
+- One `.zip` per session is written there; click "Show in Explorer" to open the folder
+
+The resulting `.zip` files are interchangeable with anything pushed to Drive — you can later import them via "Import session from local .zip file" on any machine.
+
 ### Pull (target machine)
 
 - Open the project at any path (the extension auto-fixes paths)
@@ -55,7 +66,7 @@ The extension exports the session and uploads it to `Google Drive/ClaudeCodeSync
 
 ### Import from a local file
 
-If you have a `.zip` you downloaded from Drive (or got via any other channel) and want to import it into a specific project:
+If you have a `.zip` (from Export, downloaded from Drive, sent over chat, on a USB stick — anywhere) and want to import it into a specific project:
 
 - Click `☁` → **"Import session from local .zip file"**
 - Pick the file(s) → pick the target project (current workspace, a detected project, or Browse) → confirm

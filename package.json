@@ -2,7 +2,7 @@
   "name": "claude-session-sync",
   "displayName": "Claude Session Sync",
   "description": "Sync Claude Code sessions (chat history + memory + plans) across machines via Google Drive — 1-click push/pull.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "Vincentvn28",
   "engines": {
     "vscode": "^1.85.0"
@@ -22,6 +22,11 @@
       {
         "command": "claudeSync.push",
         "title": "Claude Sync: Push session to Google Drive (one file per session)",
+        "category": "Claude Sync"
+      },
+      {
+        "command": "claudeSync.exportLocal",
+        "title": "Claude Sync: Export session to local .zip file (backup)",
         "category": "Claude Sync"
       },
       {
